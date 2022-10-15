@@ -240,8 +240,8 @@ namespace rayt
     class Scene
     {
     public:
-        Scene(int width, int height)
-            : m_image(new Image(width, height)), m_backColor(0.2f)
+        Scene(int width, int height, int samples)
+            : m_image(new Image(width, height)), m_backColor(0.2f), m_samples(samples)
         {
         }
 
@@ -282,7 +282,6 @@ namespace rayt
             return lerp(t, vec3(1), vec3(0.5f, 0.7f, 1.0f));
         }
 
-#pragma omp parallel for schedule(dynamic, 1) num_threads(NUM_THREAD)
         void render()
         {
 
@@ -290,17 +289,22 @@ namespace rayt
 
             int nx = m_image->width();
             int ny = m_image->height();
+#pragma omp parallel for schedule(dynamic, 1) num_threads(NUM_THREAD)
             for (int j = 0; j < ny; ++j)
             {
                 std::cerr << "Rendering (y = " << j << ") " << (100.0 * j / (ny - 1)) << "%" << std::endl;
                 for (int i = 0; i < nx; ++i)
                 {
+                    vec3 c(0);
+                    for (int s = 0; s < m_samples; ++s)
+                    {
+                        float u = float(i + drand48()) / float(nx);
+                        float v = float(j + drand48()) / float(ny);
+                        Ray r = m_camera->getRay(u, v);
+                        c += color(r, m_world.get());
+                    }
 
-                    float u = float(i + drand48()) / float(nx);
-                    float v = float(j + drand48()) / float(ny);
-                    Ray r = m_camera->getRay(u, v);
-                    vec3 c = color(r, m_world.get());
-
+                    c /= m_samples;
                     m_image->write(i, (ny - j - 1), c.getX(), c.getY(), c.getZ());
                 }
             }
@@ -313,6 +317,7 @@ namespace rayt
         std::unique_ptr<Image> m_image;
         std::unique_ptr<Shape> m_world;
         vec3 m_backColor;
+        int m_samples;
     };
 
 };
