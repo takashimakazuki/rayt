@@ -48,6 +48,22 @@ inline float smoothstep(float a, float b, float t)
 inline float radians(float deg) { return (deg / 180.f) * PI; }
 inline float degrees(float rad) { return (rad / PI) * 180.f; }
 
+inline vec3 random_vector()
+{
+    return vec3(drand48(), drand48(), drand48());
+}
+
+inline vec3 random_in_unit_sphere()
+{
+    vec3 p;
+    do
+    {
+        // adujust [0, 1] to [-1, 1]
+        p = 2.f * random_vector() - vec3(1.f);
+    } while (lengthSqr(p) >= 1.f);
+    return p;
+}
+
 namespace rayt
 {
 
@@ -265,7 +281,8 @@ namespace rayt
             HitRec hrec;
             if (world->hit(r, 0, FLT_MAX, hrec))
             {
-                return 0.5f * (hrec.n + vec3(1.0f));
+                vec3 target = hrec.p + hrec.n + random_in_unit_sphere();
+                return 0.5f * color(Ray(hrec.p, target - hrec.p), world);
             }
             return backgroundSky(r.direction());
         }
