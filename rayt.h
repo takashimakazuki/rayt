@@ -64,8 +64,43 @@ inline vec3 random_in_unit_sphere()
     return p;
 }
 
+inline vec3 linear_to_gamma(const vec3 &v, float gammaFactor)
+{
+    float recipGammaFactor = recip(gammaFactor);
+    return vec3(
+        powf(v.getX(), recipGammaFactor),
+        powf(v.getY(), recipGammaFactor),
+        powf(v.getZ(), recipGammaFactor));
+}
+
+inline vec3 gamma_to_linear(const vec3 &v, float gammaFactor)
+{
+    return vec3(
+        powf(v.getX(), gammaFactor),
+        powf(v.getY(), gammaFactor),
+        powf(v.getZ(), gammaFactor));
+}
+
 namespace rayt
 {
+    class ImageFilter
+    {
+    public:
+        virtual vec3 filter(const vec3 &c) const = 0;
+    };
+
+    class GammaFilter : public ImageFilter
+    {
+    public:
+        GammaFilter(float factor) : m_factor(factor) {}
+        virtual vec3 filter(const vec3 &c) const override
+        {
+            return linear_to_gamma(c, m_factor);
+        }
+
+    private:
+        float m_factor;
+    };
 
     class Shape;
     typedef std::shared_ptr<Shape> ShapePtr;
@@ -86,6 +121,9 @@ namespace rayt
             m_width = w;
             m_height = h;
             m_pixels.reset(new rgb[m_width * m_height]);
+
+            std::unique_ptr<ImageFilter> ptr(new GammaFilter(GAMMA_FACTOR));
+            m_filters.push_back(std::move(ptr));
         }
 
         int width() const { return m_width; }
@@ -94,16 +132,22 @@ namespace rayt
 
         void write(int x, int y, float r, float g, float b)
         {
+            vec3 c(r, g, b);
+            for (auto &f : m_filters)
+            {
+                c = f->filter(c);
+            }
             int index = m_width * y + x;
-            m_pixels[index].r = static_cast<unsigned char>(r * 255.99f);
-            m_pixels[index].g = static_cast<unsigned char>(g * 255.99f);
-            m_pixels[index].b = static_cast<unsigned char>(b * 255.99f);
+            m_pixels[index].r = static_cast<unsigned char>(c.getX() * 255.99f);
+            m_pixels[index].g = static_cast<unsigned char>(c.getY() * 255.99f);
+            m_pixels[index].b = static_cast<unsigned char>(c.getZ() * 255.99f);
         }
 
     private:
         int m_width;
         int m_height;
         std::unique_ptr<rgb[]> m_pixels;
+        std::vector<std::unique_ptr<ImageFilter>> m_filters;
     };
 
     class Ray
@@ -279,7 +323,7 @@ namespace rayt
         vec3 color(const rayt::Ray &r, const Shape *world) const
         {
             HitRec hrec;
-            if (world->hit(r, 0, FLT_MAX, hrec))
+            if (world->hit(r, 0.001f, FLT_MAX, hrec))
             {
                 vec3 target = hrec.p + hrec.n + random_in_unit_sphere();
                 return 0.5f * color(Ray(hrec.p, target - hrec.p), world);
