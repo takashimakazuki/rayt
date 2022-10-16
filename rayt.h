@@ -102,9 +102,6 @@ namespace rayt
         float m_factor;
     };
 
-    class Shape;
-    typedef std::shared_ptr<Shape> ShapePtr;
-
     class Image
     {
     public:
@@ -208,13 +205,51 @@ namespace rayt
         vec3 m_uvw[3]; // orthonormal basis vector
     };
 
+    class Material;
+    typedef std::shared_ptr<Material> MaterialPtr;
+
     class HitRec
     {
     public:
         float t;
         vec3 p;
         vec3 n;
+        MaterialPtr mat;
     };
+
+    class ScatterRec
+    {
+    public:
+        Ray ray;
+        vec3 albedo;
+    };
+
+    class Material
+    {
+    public:
+        virtual bool scatter(const Ray &r, const HitRec &hrec, ScatterRec &srec) const = 0;
+    };
+
+    class Lambertian : public Material
+    {
+    public:
+        Lambertian(const vec3 &c) : m_albedo(c)
+        {
+        }
+        virtual bool scatter(const Ray &r, const HitRec &hrec, ScatterRec &srec) const override
+        {
+            vec3 target = hrec.p + hrec.n + random_in_unit_sphere();
+            srec.ray = Ray(hrec.p, target - hrec.p);
+            srec.albedo = m_albedo;
+            return true;
+        };
+
+    private:
+        vec3 m_albedo;
+    };
+
+    class Shape;
+    typedef std::shared_ptr<Shape> ShapePtr;
 
     class Shape
     {
@@ -226,9 +261,12 @@ namespace rayt
     {
     public:
         Sphere() {}
-        Sphere(const vec3 &c, float r)
+        Sphere(const vec3 &c, float r, const MaterialPtr &mat)
             : m_center(c),
-              m_radius(r) {}
+              m_radius(r),
+              m_material(mat)
+        {
+        }
 
         virtual bool hit(const Ray &r, float t0, float t1, HitRec &hrec) const override
         {
@@ -246,6 +284,7 @@ namespace rayt
                     hrec.t = temp;
                     hrec.p = r.at(hrec.t);
                     hrec.n = (hrec.p - m_center) / m_radius;
+                    hrec.mat = m_material;
                     return true;
                 }
                 temp = (-b + root) / (2.0f * a);
@@ -254,6 +293,7 @@ namespace rayt
                     hrec.t = temp;
                     hrec.p = r.at(hrec.t);
                     hrec.n = (hrec.p - m_center) / m_radius;
+                    hrec.mat = m_material;
                     return true;
                 }
             }
@@ -264,6 +304,7 @@ namespace rayt
     private:
         vec3 m_center;
         float m_radius;
+        MaterialPtr m_material;
     };
 
     class ShapeList : public Shape
@@ -314,9 +355,17 @@ namespace rayt
             m_camera = std::unique_ptr<Camera>(new Camera(u, v, w));
 
             // Shapes
+
             ShapeList *world = new ShapeList();
-            world->add(std::make_shared<Sphere>(vec3(0, 0, -1), 0.5f));
-            world->add(std::make_shared<Sphere>(vec3(0, -100.5, -1), 100));
+            world->add(std::make_shared<Sphere>(
+                vec3(0.6, 0, -1), 0.5f,
+                std::make_shared<Lambertian>(vec3(0.1f, 0.2f, 0.5f))));
+            world->add(std::make_shared<Sphere>(
+                vec3(-0.6, 0, -1), 0.5f,
+                std::make_shared<Lambertian>(vec3(0.8f, 0.0f, 0.0f))));
+            world->add(std::make_shared<Sphere>(
+                vec3(0, -100.5, -1), 100,
+                std::make_shared<Lambertian>(vec3(0.8f, 0.8f, 0.0f))));
             m_world.reset(world);
         }
 
@@ -325,8 +374,15 @@ namespace rayt
             HitRec hrec;
             if (world->hit(r, 0.001f, FLT_MAX, hrec))
             {
-                vec3 target = hrec.p + hrec.n + random_in_unit_sphere();
-                return 0.5f * color(Ray(hrec.p, target - hrec.p), world);
+                ScatterRec srec;
+                if (hrec.mat->scatter(r, hrec, srec))
+                {
+                    return mulPerElem(srec.albedo, color(srec.ray, world));
+                }
+                else
+                {
+                    return vec3(0);
+                }
             }
             return backgroundSky(r.direction());
         }
