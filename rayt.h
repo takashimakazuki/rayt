@@ -87,6 +87,28 @@ inline vec3 reflect(const vec3 &v, const vec3 &n)
     return v - 2.f * dot(v, n) * n;
 }
 
+inline bool refract(const vec3 &v, const vec3 &n, float ni_over_nt, vec3 &refracted)
+{
+    vec3 uv = normalize(v);
+    float dt = dot(uv, n);
+    float D = 1.f - pow2(ni_over_nt) * (1.f - pow2(dt));
+    if (D > 0.f)
+    {
+        refracted = -ni_over_nt * (uv - n * dt) - n * sqrt(D);
+        return true;
+    }
+    else
+    {
+        return false;
+    }
+}
+
+inline float schlick(float cosine, float ri)
+{
+    float r0 = pow2((1.f - ri) / (1.f + ri));
+    return r0 + (1.f - r0) * pow5(1.f - cosine);
+}
+
 namespace rayt
 {
     class ImageFilter
@@ -277,6 +299,62 @@ namespace rayt
         float m_fuzz;
     };
 
+    class Dielectric : public Material
+    {
+    public:
+        Dielectric(float ri)
+            : m_ri(ri)
+        {
+        }
+
+        virtual bool scatter(const Ray &r, const HitRec &hrec, ScatterRec &srec) const override
+        {
+            vec3 outward_normal;
+            vec3 reflected = reflect(r.direction(), hrec.n);
+            float ni_over_nt;
+            float reflect_prob;
+            float cosine;
+            if (dot(r.direction(), hrec.n) > 0)
+            {
+                outward_normal = -hrec.n;
+                ni_over_nt = m_ri;
+                cosine = m_ri * dot(r.direction(), hrec.n) / length(r.direction());
+            }
+            else
+            {
+                outward_normal = hrec.n;
+                ni_over_nt = recip(m_ri);
+                cosine = -dot(r.direction(), hrec.n) / length(r.direction());
+            }
+
+            srec.albedo = vec3(1);
+
+            vec3 refracted;
+            if (refract(-r.direction(), outward_normal, ni_over_nt, refracted))
+            {
+                reflect_prob = schlick(cosine, m_ri);
+            }
+            else
+            {
+                reflect_prob = 1;
+            }
+
+            if (drand48() < reflect_prob)
+            {
+                srec.ray = Ray(hrec.p, reflected);
+            }
+            else
+            {
+                srec.ray = Ray(hrec.p, refracted);
+            }
+
+            return true;
+        }
+
+    private:
+        float m_ri;
+    };
+
     class Shape;
     typedef std::shared_ptr<Shape> ShapePtr;
 
@@ -378,23 +456,51 @@ namespace rayt
         void build()
         {
             // Camera
-            vec3 w(-2.0f, -1.0f, -1.0f);
-            vec3 u(4.0f, 0.0f, 0.0f);
-            vec3 v(0.0f, 2.0f, 0.0f);
-            m_camera = std::unique_ptr<Camera>(new Camera(u, v, w));
+
+            vec3 lookfrom(13, 2, 3);
+            vec3 lookat(0, 0, 0);
+            vec3 vup(0, 1, 0);
+            float aspect = float(m_image->width()) / float(m_image->height());
+            m_camera = std::make_unique<Camera>(lookfrom, lookat, vup, 20, aspect);
 
             // Shapes
 
             ShapeList *world = new ShapeList();
+
+            int N = 11;
+            for (int i = -N; i < N; ++i)
+            {
+                for (int j = -N; j < N; ++j)
+                {
+                    float choose_mat = drand48();
+                    vec3 center(i + 0.9f * drand48(), 0.2f, j + 0.9f * drand48());
+                    if (length(center - vec3(4, 0.2, 0)) > 0.9f)
+                    {
+                        if (choose_mat < 0.8f)
+                        {
+                            world->add(std::make_shared<Sphere>(
+                                center, 0.2f,
+                                std::make_shared<Lambertian>(mulPerElem(random_vector(), random_vector()))));
+                        }
+                        else if (choose_mat < 0.95f)
+                        {
+                            world->add(std::make_shared<Sphere>(
+                                center, 0.2f,
+                                std::make_shared<Metal>(0.5f * (random_vector() + vec3(1)), 0.5f * drand48())));
+                        }
+                        else
+                        {
+                            world->add(std::make_shared<Sphere>(
+                                center, 0.2f,
+                                std::make_shared<Dielectric>(1.5f)));
+                        }
+                    }
+                }
+            }
+
             world->add(std::make_shared<Sphere>(
-                vec3(0.6, 0, -1), 0.5f,
-                std::make_shared<Lambertian>(vec3(0.1f, 0.2f, 0.5f))));
-            world->add(std::make_shared<Sphere>(
-                vec3(-0.6, 0, -1), 0.5f,
-                std::make_shared<Metal>(vec3(0.8f, 0.8f, 0.8f), 1.0f)));
-            world->add(std::make_shared<Sphere>(
-                vec3(0, -100.5, -1), 100,
-                std::make_shared<Lambertian>(vec3(0.8f, 0.8f, 0.0f))));
+                vec3(0, -1000, -1), 1000,
+                std::make_shared<Lambertian>(vec3(0.5f, 0.5f, 0.5f))));
             m_world.reset(world);
         }
 
