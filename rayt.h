@@ -23,6 +23,7 @@ typedef Vector3 col3;
 #define GAMMA_FACTOR 2.2f
 
 #define NUM_THREAD 8
+#define MAX_DEPTH 50
 
 inline float pow2(float x)
 {
@@ -79,6 +80,11 @@ inline vec3 gamma_to_linear(const vec3 &v, float gammaFactor)
         powf(v.getX(), gammaFactor),
         powf(v.getY(), gammaFactor),
         powf(v.getZ(), gammaFactor));
+}
+
+inline vec3 reflect(const vec3 &v, const vec3 &n)
+{
+    return v - 2.f * dot(v, n) * n;
 }
 
 namespace rayt
@@ -248,6 +254,29 @@ namespace rayt
         vec3 m_albedo;
     };
 
+    class Metal : public Material
+    {
+    public:
+        Metal(const vec3 &c, float fuzz)
+            : m_albedo(c),
+              m_fuzz(fuzz)
+        {
+        }
+
+        virtual bool scatter(const Ray &r, const HitRec &hrec, ScatterRec &srec) const override
+        {
+            vec3 reflected = reflect(normalize(r.direction()), hrec.n);
+            reflected += m_fuzz * random_in_unit_sphere();
+            srec.ray = Ray(hrec.p, reflected);
+            srec.albedo = m_albedo;
+            return dot(srec.ray.direction(), hrec.n) > 0;
+        }
+
+    private:
+        vec3 m_albedo;
+        float m_fuzz;
+    };
+
     class Shape;
     typedef std::shared_ptr<Shape> ShapePtr;
 
@@ -362,22 +391,23 @@ namespace rayt
                 std::make_shared<Lambertian>(vec3(0.1f, 0.2f, 0.5f))));
             world->add(std::make_shared<Sphere>(
                 vec3(-0.6, 0, -1), 0.5f,
-                std::make_shared<Lambertian>(vec3(0.8f, 0.0f, 0.0f))));
+                std::make_shared<Metal>(vec3(0.8f, 0.8f, 0.8f), 1.0f)));
             world->add(std::make_shared<Sphere>(
                 vec3(0, -100.5, -1), 100,
                 std::make_shared<Lambertian>(vec3(0.8f, 0.8f, 0.0f))));
             m_world.reset(world);
         }
 
-        vec3 color(const rayt::Ray &r, const Shape *world) const
+        vec3 color(const rayt::Ray &r, const Shape *world, int depth) const
         {
             HitRec hrec;
             if (world->hit(r, 0.001f, FLT_MAX, hrec))
             {
                 ScatterRec srec;
-                if (hrec.mat->scatter(r, hrec, srec))
+                if (depth < MAX_DEPTH && hrec.mat->scatter(r, hrec, srec))
                 {
-                    return mulPerElem(srec.albedo, color(srec.ray, world));
+
+                    return mulPerElem(srec.albedo, color(srec.ray, world, depth + 1));
                 }
                 else
                 {
@@ -418,7 +448,7 @@ namespace rayt
                         float u = float(i + drand48()) / float(nx);
                         float v = float(j + drand48()) / float(ny);
                         Ray r = m_camera->getRay(u, v);
-                        c += color(r, m_world.get());
+                        c += color(r, m_world.get(), 0);
                     }
 
                     c /= m_samples;
