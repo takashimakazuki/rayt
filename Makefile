@@ -1,2 +1,4 @@
+CC=g++-12
+
 rayt: rayt.cpp rayt.h
-	g++ -o rayt rayt.cpp -std=c++14
+	$(CC) -o rayt rayt.cpp -fopenmp
