@@ -109,6 +109,15 @@ inline float schlick(float cosine, float ri)
     return r0 + (1.f - r0) * pow5(1.f - cosine);
 }
 
+inline void get_sphere_uv(const vec3 &p, float &u, float &v)
+{
+    float phi = atan2(p.getZ(), p.getX());
+    float theta = asin(p.getY());
+
+    u = 1.f - (phi + PI) / (2.f * PI);
+    v = (theta + PI / 2.f) / PI;
+}
+
 namespace rayt
 {
     class Texture;
@@ -166,6 +175,44 @@ namespace rayt
         float m_freq;
     };
 
+    class ImageTexture : public Texture
+    {
+    public:
+        ImageTexture(const char *name)
+        {
+            int nn;
+            m_texels = stbi_load(name, &m_width, &m_height, &nn, 0);
+        }
+
+        virtual ~ImageTexture()
+        {
+            stbi_image_free(m_texels);
+        }
+
+        virtual vec3 value(float u, float v, const vec3 &p) const override
+        {
+            int i = (u)*m_width;
+            int j = (1 - v) * m_height - 0.001;
+            return sample(i, j);
+        }
+
+        vec3 sample(int u, int v) const
+        {
+            u = u < 0 ? 0 : u >= m_width ? m_width - 1
+                                         : u;
+            v = v < 0 ? 0 : v >= m_height ? m_height - 1
+                                          : v;
+            return vec3(
+                int(m_texels[3 * u + 3 * m_width * v]) / 255.0,
+                int(m_texels[3 * u + 3 * m_width * v + 1]) / 255.0,
+                int(m_texels[3 * u + 3 * m_width * v + 2]) / 255.0);
+        }
+
+    private:
+        int m_width;
+        int m_height;
+        unsigned char *m_texels;
+    };
     class ImageFilter
     {
     public:
@@ -443,6 +490,7 @@ namespace rayt
                     hrec.p = r.at(hrec.t);
                     hrec.n = (hrec.p - m_center) / m_radius;
                     hrec.mat = m_material;
+                    get_sphere_uv(hrec.p, hrec.u, hrec.v);
                     return true;
                 }
                 temp = (-b + root) / (2.0f * a);
@@ -452,6 +500,7 @@ namespace rayt
                     hrec.p = r.at(hrec.t);
                     hrec.n = (hrec.p - m_center) / m_radius;
                     hrec.mat = m_material;
+                    get_sphere_uv(hrec.p, hrec.u, hrec.v);
                     return true;
                 }
             }
@@ -519,7 +568,12 @@ namespace rayt
             world->add(std::make_shared<Sphere>(
                 vec3(0.6, 0, -1), 0.5f,
                 std::make_shared<Lambertian>(
-                    std::make_shared<ColorTexture>(vec3(0.1f, 0.2f, 0.5f)))));
+                    std::make_shared<ImageTexture>("./assets/brick_diffuse.jpg"))));
+
+            // world->add(std::make_shared<Sphere>(
+            //     vec3(0.6, 0, -1), 0.5f,
+            //     std::make_shared<Lambertian>(
+            //         std::make_shared<ColorTexture>(vec3(0.1f, 0.2f, 0.5f)))));
             world->add(std::make_shared<Sphere>(
                 vec3(-0.6, 0, -1), 0.5f,
                 std::make_shared<Metal>(
@@ -592,7 +646,7 @@ namespace rayt
                 }
             }
 
-            stbi_write_bmp("render_checker.bmp", nx, ny, sizeof(Image::rgb), m_image->pixels());
+            stbi_write_bmp("render_image_texture.bmp", nx, ny, sizeof(Image::rgb), m_image->pixels());
         }
 
     private:
