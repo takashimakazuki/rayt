@@ -111,6 +111,61 @@ inline float schlick(float cosine, float ri)
 
 namespace rayt
 {
+    class Texture;
+    typedef std::shared_ptr<Texture> TexturePtr;
+    class ColorTexture;
+    class CheckerTexture;
+
+    class Material;
+    typedef std::shared_ptr<Material> MaterialPtr;
+
+    class Shape;
+    typedef std::shared_ptr<Shape> ShapePtr;
+
+    class Texture
+    {
+    public:
+        virtual vec3 value(float u, float v, const vec3 &p) const = 0;
+    };
+
+    class ColorTexture : public Texture
+    {
+    public:
+        ColorTexture(const vec3 &c) : m_color(c) {}
+
+        vec3 value(float u, float v, const vec3 &p) const override
+        {
+            return m_color;
+        }
+
+    private:
+        vec3 m_color;
+    };
+
+    class CheckerTexture : public Texture
+    {
+    public:
+        CheckerTexture(const TexturePtr &t0, const TexturePtr &t1, float freq)
+            : m_odd(t0), m_even(t1), m_freq(freq) {}
+        virtual vec3 value(float u, float v, const vec3 &p) const override
+        {
+            float sines = sinf(m_freq * p.getX()) * sinf(m_freq * p.getY()) * sinf(m_freq * p.getZ());
+            if (sines < 0)
+            {
+                return m_odd->value(u, v, p);
+            }
+            else
+            {
+                return m_even->value(u, v, p);
+            }
+        }
+
+    private:
+        TexturePtr m_odd;
+        TexturePtr m_even;
+        float m_freq;
+    };
+
     class ImageFilter
     {
     public:
@@ -233,13 +288,12 @@ namespace rayt
         vec3 m_uvw[3]; // orthonormal basis vector
     };
 
-    class Material;
-    typedef std::shared_ptr<Material> MaterialPtr;
-
     class HitRec
     {
     public:
         float t;
+        float u;
+        float v;
         vec3 p;
         vec3 n;
         MaterialPtr mat;
@@ -261,26 +315,26 @@ namespace rayt
     class Lambertian : public Material
     {
     public:
-        Lambertian(const vec3 &c) : m_albedo(c)
+        Lambertian(const TexturePtr &a) : m_albedo(a)
         {
         }
         virtual bool scatter(const Ray &r, const HitRec &hrec, ScatterRec &srec) const override
         {
             vec3 target = hrec.p + hrec.n + random_in_unit_sphere();
             srec.ray = Ray(hrec.p, target - hrec.p);
-            srec.albedo = m_albedo;
+            srec.albedo = m_albedo->value(hrec.u, hrec.v, hrec.p);
             return true;
         };
 
     private:
-        vec3 m_albedo;
+        TexturePtr m_albedo;
     };
 
     class Metal : public Material
     {
     public:
-        Metal(const vec3 &c, float fuzz)
-            : m_albedo(c),
+        Metal(const TexturePtr &a, float fuzz)
+            : m_albedo(a),
               m_fuzz(fuzz)
         {
         }
@@ -290,12 +344,12 @@ namespace rayt
             vec3 reflected = reflect(normalize(r.direction()), hrec.n);
             reflected += m_fuzz * random_in_unit_sphere();
             srec.ray = Ray(hrec.p, reflected);
-            srec.albedo = m_albedo;
+            srec.albedo = m_albedo->value(hrec.u, hrec.v, hrec.p);
             return dot(srec.ray.direction(), hrec.n) > 0;
         }
 
     private:
-        vec3 m_albedo;
+        TexturePtr m_albedo;
         float m_fuzz;
     };
 
@@ -354,9 +408,6 @@ namespace rayt
     private:
         float m_ri;
     };
-
-    class Shape;
-    typedef std::shared_ptr<Shape> ShapePtr;
 
     class Shape
     {
@@ -457,50 +508,29 @@ namespace rayt
         {
             // Camera
 
-            vec3 lookfrom(13, 2, 3);
-            vec3 lookat(0, 0, 0);
-            vec3 vup(0, 1, 0);
-            float aspect = float(m_image->width()) / float(m_image->height());
-            m_camera = std::make_unique<Camera>(lookfrom, lookat, vup, 20, aspect);
+            vec3 w(-2.0f, -1.0f, -1.0f);
+            vec3 u(4.0f, 0.0f, 0.0f);
+            vec3 v(0.0f, 2.0f, 0.0f);
+            m_camera = std::make_unique<Camera>(u, v, w);
 
             // Shapes
 
             ShapeList *world = new ShapeList();
-
-            int N = 11;
-            for (int i = -N; i < N; ++i)
-            {
-                for (int j = -N; j < N; ++j)
-                {
-                    float choose_mat = drand48();
-                    vec3 center(i + 0.9f * drand48(), 0.2f, j + 0.9f * drand48());
-                    if (length(center - vec3(4, 0.2, 0)) > 0.9f)
-                    {
-                        if (choose_mat < 0.8f)
-                        {
-                            world->add(std::make_shared<Sphere>(
-                                center, 0.2f,
-                                std::make_shared<Lambertian>(mulPerElem(random_vector(), random_vector()))));
-                        }
-                        else if (choose_mat < 0.95f)
-                        {
-                            world->add(std::make_shared<Sphere>(
-                                center, 0.2f,
-                                std::make_shared<Metal>(0.5f * (random_vector() + vec3(1)), 0.5f * drand48())));
-                        }
-                        else
-                        {
-                            world->add(std::make_shared<Sphere>(
-                                center, 0.2f,
-                                std::make_shared<Dielectric>(1.5f)));
-                        }
-                    }
-                }
-            }
-
             world->add(std::make_shared<Sphere>(
-                vec3(0, -1000, -1), 1000,
-                std::make_shared<Lambertian>(vec3(0.5f, 0.5f, 0.5f))));
+                vec3(0.6, 0, -1), 0.5f,
+                std::make_shared<Lambertian>(
+                    std::make_shared<ColorTexture>(vec3(0.1f, 0.2f, 0.5f)))));
+            world->add(std::make_shared<Sphere>(
+                vec3(-0.6, 0, -1), 0.5f,
+                std::make_shared<Metal>(
+                    std::make_shared<ColorTexture>(vec3(0.8f, 0.8f, 0.8f)), 0.4f)));
+            world->add(std::make_shared<Sphere>(
+                vec3(0, -100.5, -1), 100,
+                std::make_shared<Lambertian>(
+                    std::make_shared<CheckerTexture>(
+                        std::make_shared<ColorTexture>(vec3(0.8f, 0.8f, 0.0f)),
+                        std::make_shared<ColorTexture>(vec3(0.8f, 0.2f, 0.0f)), 10.f))));
+
             m_world.reset(world);
         }
 
@@ -562,7 +592,7 @@ namespace rayt
                 }
             }
 
-            stbi_write_bmp("render.bmp", nx, ny, sizeof(Image::rgb), m_image->pixels());
+            stbi_write_bmp("render_checker.bmp", nx, ny, sizeof(Image::rgb), m_image->pixels());
         }
 
     private:
@@ -573,4 +603,4 @@ namespace rayt
         int m_samples;
     };
 
-};
+}
