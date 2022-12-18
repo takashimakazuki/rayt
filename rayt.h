@@ -357,6 +357,7 @@ namespace rayt
     {
     public:
         virtual bool scatter(const Ray &r, const HitRec &hrec, ScatterRec &srec) const = 0;
+        virtual vec3 emitted(const Ray &r, const HitRec &hrec) const { return vec3(0); }
     };
 
     class Lambertian : public Material
@@ -454,6 +455,26 @@ namespace rayt
 
     private:
         float m_ri;
+    };
+
+    class DiffuseLight : public Material
+    {
+    public:
+        DiffuseLight(const TexturePtr &emit)
+            : m_emit(emit) {}
+
+        virtual bool scatter(const Ray &r, const HitRec &hrec, ScatterRec &srec) const override
+        {
+            return false;
+        }
+
+        virtual vec3 emitted(const Ray &r, const HitRec &hrec) const override
+        {
+            return m_emit->value(hrec.u, hrec.v, hrec.p);
+        }
+
+    private:
+        TexturePtr m_emit;
     };
 
     class Shape
@@ -566,24 +587,13 @@ namespace rayt
 
             ShapeList *world = new ShapeList();
             world->add(std::make_shared<Sphere>(
-                vec3(0.6, 0, -1), 0.5f,
-                std::make_shared<Lambertian>(
-                    std::make_shared<ImageTexture>("./assets/brick_diffuse.jpg"))));
-
-            // world->add(std::make_shared<Sphere>(
-            //     vec3(0.6, 0, -1), 0.5f,
-            //     std::make_shared<Lambertian>(
-            //         std::make_shared<ColorTexture>(vec3(0.1f, 0.2f, 0.5f)))));
-            world->add(std::make_shared<Sphere>(
-                vec3(-0.6, 0, -1), 0.5f,
-                std::make_shared<Metal>(
-                    std::make_shared<ColorTexture>(vec3(0.8f, 0.8f, 0.8f)), 0.4f)));
+                vec3(0, 0, -1), 0.5f,
+                std::make_shared<DiffuseLight>(
+                    std::make_shared<ColorTexture>(vec3(1)))));
             world->add(std::make_shared<Sphere>(
                 vec3(0, -100.5, -1), 100,
                 std::make_shared<Lambertian>(
-                    std::make_shared<CheckerTexture>(
-                        std::make_shared<ColorTexture>(vec3(0.8f, 0.8f, 0.0f)),
-                        std::make_shared<ColorTexture>(vec3(0.8f, 0.2f, 0.0f)), 10.f))));
+                    std::make_shared<ColorTexture>(vec3(0.8f, 0.8f, 0.8f)))));
 
             m_world.reset(world);
         }
@@ -593,15 +603,16 @@ namespace rayt
             HitRec hrec;
             if (world->hit(r, 0.001f, FLT_MAX, hrec))
             {
+                vec3 emitted = hrec.mat->emitted(r, hrec);
                 ScatterRec srec;
                 if (depth < MAX_DEPTH && hrec.mat->scatter(r, hrec, srec))
                 {
 
-                    return mulPerElem(srec.albedo, color(srec.ray, world, depth + 1));
+                    return emitted + mulPerElem(srec.albedo, color(srec.ray, world, depth + 1));
                 }
                 else
                 {
-                    return vec3(0);
+                    return emitted;
                 }
             }
             return backgroundSky(r.direction());
@@ -646,7 +657,7 @@ namespace rayt
                 }
             }
 
-            stbi_write_bmp("render_image_texture.bmp", nx, ny, sizeof(Image::rgb), m_image->pixels());
+            stbi_write_bmp("render_diffuse_light.bmp", nx, ny, sizeof(Image::rgb), m_image->pixels());
         }
 
     private:
