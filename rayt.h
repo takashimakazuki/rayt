@@ -232,6 +232,16 @@ namespace rayt
         float m_factor;
     };
 
+    class TonemapFilter : public ImageFilter
+    {
+    public:
+        TonemapFilter() {}
+        virtual vec3 filter(const vec3 &c) const override
+        {
+            return minPerElem(maxPerElem(c, Vector3(0.f)), Vector3(1.f));
+        }
+    };
+
     class Image
     {
     public:
@@ -249,8 +259,8 @@ namespace rayt
             m_height = h;
             m_pixels.reset(new rgb[m_width * m_height]);
 
-            std::unique_ptr<ImageFilter> ptr(new GammaFilter(GAMMA_FACTOR));
-            m_filters.push_back(std::move(ptr));
+            m_filters.push_back(std::make_unique<GammaFilter>(GAMMA_FACTOR));
+            m_filters.push_back(std::make_unique<TonemapFilter>());
         }
 
         int width() const { return m_width; }
@@ -738,7 +748,7 @@ namespace rayt
                 }
             }
 
-            stbi_write_bmp("render_rect.bmp", nx, ny, sizeof(Image::rgb), m_image->pixels());
+            stbi_write_bmp("render_rect_tonemap.bmp", nx, ny, sizeof(Image::rgb), m_image->pixels());
         }
 
     private:
